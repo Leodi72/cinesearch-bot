@@ -1,0 +1,1 @@
+worker: python faq_bot.py
