@@ -63,10 +63,10 @@ def build_location_keyboard():
 def build_bluray_keyboard(titre: str):
     query = quote(f"{titre} sortie Blu-Ray date")
     google_url = f"https://www.google.com/search?q={query}"
-    allocine_url = f"https://www.allocine.fr/recherche/?q={quote(titre)}"
+    justwatch_url = f"https://www.justwatch.com/fr/recherche?q={quote(titre)}"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🔍 Chercher sur Google", url=google_url)],
-        [InlineKeyboardButton("🎬 Chercher sur AlloCiné", url=allocine_url)],
+        [InlineKeyboardButton("🎬 Chercher sur JustWatch", url=justwatch_url)],
         [InlineKeyboardButton("⬅️ Retour au menu", callback_data="menu")],
     ])
 
