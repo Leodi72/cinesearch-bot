@@ -12,7 +12,8 @@ from telegram.ext import (
 # =============================================
 # 🔧 CONFIGURATION
 # =============================================
-BOT_TOKEN = "8467102753:AAFA665YLTvOMm64xd_QbPbYMVVtfBXqnS0"
+import os
+BOT_TOKEN = os.environ.get(8467102753:AAGeJcN0LR0GxtXz4fK1Q6dSt1k7i8QCCDs)
 ADMIN_IDS = [5140415021]  # Ajoute le Chat ID de ton duo ici quand tu l'as : [5140415021, CHAT_ID_DUO]
 
 # Logging
