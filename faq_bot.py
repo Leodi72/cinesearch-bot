@@ -110,8 +110,7 @@ async def bouton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             admin_nom = query.from_user.first_name
             await context.bot.send_message(
                 chat_id=demande["user_id"],
-                text=f"📺 *Ce contenu est déjà disponible en ligne !*\n\n"
-                     f"🔗 {demande['lien']}\n\n"
+                text=f"🎬 *Bonne nouvelle, ce contenu est déjà disponible sur notre site !*\n\n"
                      f"Merci quand même pour ta contribution 😊",
                 parse_mode="Markdown"
             )
