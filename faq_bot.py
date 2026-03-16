@@ -1,10 +1,9 @@
 import logging
 import os
+import requests
 from datetime import datetime, timezone
 from urllib.parse import quote
-from timezonefinder import TimezoneFinder
-import pytz
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler,
     MessageHandler, filters, ContextTypes
@@ -14,6 +13,7 @@ from telegram.ext import (
 # 🔧 CONFIGURATION
 # =============================================
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
+TMDB_API_KEY = "05902896074695709d7763505bb88b4d"
 ADMIN_IDS = [5140415021]  # Ajoute le Chat ID de ton duo : [5140415021, CHAT_ID_DUO]
 
 # Logging
@@ -26,18 +26,56 @@ logging.basicConfig(
 demandes_en_attente = {}
 
 # =============================================
-# 🕐 Salutation selon l'heure
+# 🕐 Salutation selon l'heure (heure française fixe)
 # =============================================
-def get_salutation(offset_hours: float = 1) -> str:
-    heure_locale = (datetime.now(timezone.utc).hour + offset_hours) % 24
+def get_salutation() -> str:
+    heure_locale = (datetime.now(timezone.utc).hour + 1) % 24
     if 6 <= heure_locale < 18:
         return "🌞 Merci et bonne journée !"
     else:
         return "🌙 Merci et bonne soirée !"
 
-def salutation_from_context(context: ContextTypes.DEFAULT_TYPE) -> str:
-    offset = context.user_data.get("tz_offset", 1)
-    return get_salutation(offset)
+# =============================================
+# 🎬 Recherche TMDB
+# =============================================
+def recherche_tmdb(titre: str):
+    url = "https://api.themoviedb.org/3/search/multi"
+    params = {
+        "api_key": TMDB_API_KEY,
+        "query": titre,
+        "language": "fr-FR",
+        "page": 1
+    }
+    try:
+        response = requests.get(url, params=params, timeout=5)
+        data = response.json()
+        resultats = []
+        for item in data.get("results", [])[:5]:
+            media_type = item.get("media_type")
+            if media_type == "movie":
+                nom = item.get("title", "?")
+                annee = item.get("release_date", "")[:4]
+                emoji = "🎬"
+                type_fr = "Film"
+            elif media_type == "tv":
+                nom = item.get("name", "?")
+                annee = item.get("first_air_date", "")[:4]
+                emoji = "📺"
+                type_fr = "Série"
+            else:
+                continue
+            tmdb_id = item.get("id")
+            tmdb_url = f"https://www.themoviedb.org/{media_type}/{tmdb_id}"
+            resultats.append({
+                "nom": nom,
+                "annee": annee,
+                "emoji": emoji,
+                "type": type_fr,
+                "url": tmdb_url,
+            })
+        return resultats
+    except Exception:
+        return []
 
 # =============================================
 # Claviers
@@ -49,6 +87,13 @@ def build_bluray_keyboard(titre: str):
         [InlineKeyboardButton("🔍 Chercher sur Google", url=google_url)],
     ])
 
+def build_tmdb_keyboard(resultats: list):
+    boutons = []
+    for r in resultats:
+        label = f"{r['emoji']} {r['nom']} ({r['annee']}) — {r['type']}"
+        boutons.append([InlineKeyboardButton(label, url=r['url'])])
+    return InlineKeyboardMarkup(boutons)
+
 def build_approbation_keyboard(demande_id: str):
     return InlineKeyboardMarkup([
         [
@@ -58,24 +103,13 @@ def build_approbation_keyboard(demande_id: str):
         ]
     ])
 
-def build_loc_request_keyboard():
-    bouton = KeyboardButton("📍 Envoyer ma localisation", request_location=True)
-    return ReplyKeyboardMarkup([[bouton]], resize_keyboard=True, one_time_keyboard=True)
-
-def build_location_keyboard():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📍 Partager ma localisation", callback_data="share_loc")],
-        [InlineKeyboardButton("🇫🇷 Non merci, continuer en heure française", callback_data="tz_france")],
-    ])
-
 # =============================================
 # /start
 # =============================================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 Bienvenue sur CineSearch !\n\n"
-        "📍 Veux-tu partager ta localisation pour que je détecte ton fuseau horaire automatiquement ?",
-        reply_markup=build_location_keyboard()
+        "Envoie-moi un titre de film ou de série et je m'occupe du reste ! 😊"
     )
 
 # =============================================
@@ -86,32 +120,15 @@ async def bouton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     cle = query.data
 
-    if cle == "share_loc":
-        await query.edit_message_text(
-            "📍 Appuie sur le bouton ci-dessous pour partager ta position :"
-        )
-        await query.message.reply_text(
-            "👇 Appuie sur le bouton pour partager ta localisation :",
-            reply_markup=build_loc_request_keyboard()
-        )
-
-    elif cle == "tz_france":
-        context.user_data["tz_offset"] = 1
-        await query.edit_message_text(
-            "🇫🇷 Heure française sélectionnée !\n\n"
-            "👋 Envoie-moi un titre de film ou un lien et je m'occupe du reste ! 😊"
-        )
-
-    # ── Déjà en ligne ──
-    elif cle.startswith("deja_"):
+    if cle.startswith("deja_"):
         demande_id = cle.replace("deja_", "")
         if demande_id in demandes_en_attente:
             demande = demandes_en_attente.pop(demande_id)
             admin_nom = query.from_user.first_name
             await context.bot.send_message(
                 chat_id=demande["user_id"],
-                text=f"🎬 *Bonne nouvelle, ce contenu est déjà disponible sur notre site !*\n\n"
-                     f"Merci quand même pour ta contribution 😊",
+                text="🎬 *Bonne nouvelle, ce contenu est déjà disponible sur notre site !*\n\n"
+                     "Merci quand même pour ta contribution 😊",
                 parse_mode="Markdown"
             )
             await query.edit_message_text(
@@ -123,7 +140,6 @@ async def bouton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await query.edit_message_text("⚠️ Cette demande a déjà été traitée.")
 
-    # ── Accepter ──
     elif cle.startswith("accept_"):
         demande_id = cle.replace("accept_", "")
         if demande_id in demandes_en_attente:
@@ -145,7 +161,6 @@ async def bouton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await query.edit_message_text("⚠️ Cette demande a déjà été traitée.")
 
-    # ── Refuser ──
     elif cle.startswith("refuse_"):
         demande_id = cle.replace("refuse_", "")
         if demande_id in demandes_en_attente:
@@ -168,34 +183,10 @@ async def bouton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("⚠️ Cette demande a déjà été traitée.")
 
 # =============================================
-# Gestion de la localisation
-# =============================================
-async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    loc = update.message.location
-    try:
-        tf = TimezoneFinder()
-        tz_name = tf.timezone_at(lng=loc.longitude, lat=loc.latitude)
-        tz = pytz.timezone(tz_name)
-        offset = tz.utcoffset(datetime.now()).total_seconds() / 3600
-        context.user_data["tz_offset"] = offset
-        pays = tz_name.split("/")[-1].replace("_", " ")
-        await update.message.reply_text(
-            f"✅ Localisation détectée : *{pays}*\n\n"
-            f"👋 Envoie-moi un titre de film ou un lien et je m'occupe du reste ! 😊",
-            parse_mode="Markdown"
-        )
-    except Exception:
-        context.user_data["tz_offset"] = 1
-        await update.message.reply_text(
-            "✅ Localisation reçue !\n\n"
-            "👋 Envoie-moi un titre de film ou un lien et je m'occupe du reste ! 😊"
-        )
-
-# =============================================
 # Gestion des messages texte — détection auto
 # =============================================
 async def message_texte(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    salut = salutation_from_context(context)
+    salut = get_salutation()
     texte = update.message.text.strip()
     user = update.message.from_user
     nom = f"{user.first_name or ''} (@{user.username or 'sans pseudo'})"
@@ -208,7 +199,6 @@ async def message_texte(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "user_name": nom,
             "lien": texte
         }
-
         await update.message.reply_text(
             f"⏳ *Lien reçu, merci !*\n\n"
             f"🔗 {texte}\n\n"
@@ -217,7 +207,6 @@ async def message_texte(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"_{salut}_",
             parse_mode="Markdown"
         )
-
         for admin_id in ADMIN_IDS:
             await context.bot.send_message(
                 chat_id=admin_id,
@@ -231,13 +220,37 @@ async def message_texte(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ── Détection titre de film ──
     else:
-        await update.message.reply_text(
-            f"🎬 *{texte}*\n\n"
-            f"Clique ci-dessous pour chercher la date de sortie Blu-Ray 👇\n\n"
-            f"_{salut}_",
-            reply_markup=build_bluray_keyboard(texte),
-            parse_mode="Markdown"
-        )
+        resultats = recherche_tmdb(texte)
+
+        if not resultats:
+            await update.message.reply_text(
+                f"🎬 *{texte}*\n\n"
+                f"Aucun résultat trouvé sur TMDB.\n"
+                f"Clique ci-dessous pour chercher la date de sortie Blu-Ray 👇\n\n"
+                f"_{salut}_",
+                reply_markup=build_bluray_keyboard(texte),
+                parse_mode="Markdown"
+            )
+        elif len(resultats) == 1:
+            r = resultats[0]
+            await update.message.reply_text(
+                f"{r['emoji']} *{r['nom']}* ({r['annee']}) — {r['type']}\n\n"
+                f"Clique ci-dessous pour voir la fiche TMDB 👇\n\n"
+                f"_{salut}_",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔗 Voir sur TMDB", url=r['url'])],
+                    [InlineKeyboardButton("🔍 Chercher la date Blu-Ray", url=f"https://www.google.com/search?q={quote(r['nom'] + ' sortie Blu-Ray date')}")],
+                ]),
+                parse_mode="Markdown"
+            )
+        else:
+            await update.message.reply_text(
+                f"🔎 *Plusieurs résultats pour \"{texte}\"*\n\n"
+                f"Clique sur le bon titre 👇\n\n"
+                f"_{salut}_",
+                reply_markup=build_tmdb_keyboard(resultats),
+                parse_mode="Markdown"
+            )
 
 # =============================================
 # Lancement
@@ -247,7 +260,6 @@ if __name__ == "__main__":
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(bouton_callback))
-    app.add_handler(MessageHandler(filters.LOCATION, handle_location))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_texte))
 
     print("🤖 Bot démarré ! Appuie sur Ctrl+C pour arrêter.")
