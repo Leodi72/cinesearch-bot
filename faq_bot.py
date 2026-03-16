@@ -13,7 +13,7 @@ from telegram.ext import (
 # 🔧 CONFIGURATION
 # =============================================
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-TMDB_API_KEY = "05902896074695709d7763505bb88b4d"
+TMDB_API_KEY = "TMDB_API_KEY"
 ADMIN_IDS = [5140415021]  # Ajoute le Chat ID de ton duo : [5140415021, CHAT_ID_DUO]
 
 # Logging
